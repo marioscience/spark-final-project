@@ -1,104 +1,93 @@
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.SparkContext._
 import org.apache.spark.rdd.RDD
+import org.apache.log4j.Logger
+import org.apache.log4j.Level
+import scala.math.BigDecimal
 
 object BootstrapStatistics {
-  def main(args: Array[String]) {
+  def main(args: Array[String]) = {
+    val numberOfIterations = 1000
+
     // set up spark session
     val spark = SparkSession.builder
       .appName("Bootstrap Statistics")
-      .config("spark.master", "local") // development only
+      .config("spark.master", "local")
       .getOrCreate()
+
+    // Suppress LOG messages
+    Logger.getLogger("org").setLevel(Level.ERROR)
+    Logger.getLogger("akka").setLevel(Level.ERROR)
 
     // load up data file
     // US Births in 1969 - 1988
     val dataFile = "input/Birthdays.csv"
     val birthdayData = spark.read.textFile(dataFile).cache()
     val populationRDD = birthdayData.rdd
-    val dataHeader = birthdayData.take(1) // skip header
+    val dataHeader = birthdayData.take(1)
 
-    // reduce data to year-month-day and births for that month
+    // reduce data to year-month-day and births for that day
     val population = populationRDD.filter(_ != dataHeader(0))
       .map(line => line.split(","))
       .map(line => (line(2), line(7).replace("\"", "").toInt))
       .cache()
 
-    val populationFormatData = formatData(population)
-
-    // Compute Category, Mean, Variance by year of US Births
-    val populationStatistics = populationFormatData
-      .sortByKey()
-      .map(summariseStatisticsV(population))
-
-    // Print results - statistics are for daily rates
-    //println("Year | Mean | Variance")
-    populationStatistics.collect()
+    // Compute mean, variance by accumulating totals.
+    println("Year \t| Mean \t\t| Variance")
+    prepareForSummary(population)
+      .map(summarizeStatistics)
+      //.saveAsTextFile("output")
+      .collect()
       .foreach(printSummaryWindow)
 
-    // Creating sample for bootstrapping
+    // Set up bootstrapping
     val bootstrapSample = population.sample(false, 0.25)
     var bootstrapSampleAggregate = collection.mutable.Map[String, (Double, Double)]()
 
-    // Create 1000 samples with replacement for bootstrapping
-    val numberOfSamplingIterations = 10
-    for ( n <- 0 to numberOfSamplingIterations) {
-      val resampledData = formatData(bootstrapSample.sample(true, 1))
-        .map(summariseStatistics)
-
-      resampledData.collect().map(a => {
-        //bootstrapSampleAggregate = bootstrapSampleAggregate :+ a
-//        if (bootstrapSampleAggregate.contains(a._1)) {
-//          val valToUpdate = bootstrapSampleAggregate.get(a._1) match {
-//            case Some(e) => bootstrapSampleAggregate.update(a._1, )
-//          }
-//          //bootstrapSampleAggregate = bootstrapSampleAggregate + (a._1 -> (a._2 + valToUpdate.getOrElse(0), a._3))
-//        } else {
-//          bootstrapSampleAggregate = bootstrapSampleAggregate + (a._1 -> (a._2, a._3))
-//        }
-        //println(a._3)
-        bootstrapSampleAggregate.get(a._1) match {
-          case Some(e) => bootstrapSampleAggregate.update(a._1, (e._1 + a._2, e._2 + a._3))
-          case None => bootstrapSampleAggregate += (a._1 -> (a._2, a._3))
-        }
-      })
-    }
-
-    //bootstrapSampleAggregate.map(println)
+    for (n <- 0 to numberOfIterations) {
+      val dataResample = prepareForSummary(bootstrapSample.sample(true, 1))
+        .map(summarizeStatistics)
+        .collect()
+        .map(x => {
+          bootstrapSampleAggregate.get(x._1) match {
+            case Some(e) => bootstrapSampleAggregate.update(x._1, (e._1 + x._2, e._2 + x._3))
+            case None => bootstrapSampleAggregate += (x._1 -> (x._2, x._3))
+          }
+          x
+        })
+      //.collect()
       //.foreach(printSummaryWindow)
-
+    }
+    println("===============Bootstrap====================")
+    println("Year \t| Mean \t\t| Variance")
+    bootstrapSampleAggregate
+      .map(stat => (stat._1, stat._2._1 / numberOfIterations, stat._2._2 / numberOfIterations))
+      .map(stat => printSummaryWindow(stat))
+    println("============================================")
     spark.stop()
   }
 
-  def formatData(dataset: RDD[(String, Int)]): RDD[(String, (Int, Int))] = {
-    dataset.map(line => (line._1, (line._2, 1)))
-      .reduceByKey((a, b) => (a._1 + b._1, a._2 + b._2))
+  def prepareForSummary(dataPoints: RDD[(String, Int)]) = {
+    dataPoints
+      .map(line => (line._1, (line._2, 1)))
+      .groupByKey()
+      .map(yearDataPoint => (yearDataPoint._1, yearDataPoint._2.reduce((a, b) => (a._1 + b._1, a._2 + b._2)), yearDataPoint._2.map(a => a._1)))
   }
 
-  def summariseStatistics(yearBirthsData: (String, (Int, Int))) = {
-    // calc mean and variance
-    // TODO: fix results to two decimal places
-    val year = yearBirthsData._1
-    val mean = yearBirthsData._2._1.toDouble / yearBirthsData._2._2 // u = total/count
-    val variance = Math.pow(yearBirthsData._2._1 - mean, 2) / yearBirthsData._2._2 // var(x) = E[(x-u)^2]
-    (year, mean, variance)
-  }
+  def summarizeStatistics(dataPoint: (String, (Int, Int), Iterable[Int])): (String, Double, Double) = {
+    val year = dataPoint._1
+    val mean = dataPoint._2._1.toDouble / dataPoint._2._2
+    val count = dataPoint._2._2
+    val dailyDataPoints = dataPoint._3
 
-  def summariseStatisticsV(rawDataPoints: RDD[(String, Int)])(yearBirthsData: (String, (Int, Int))) = {
-    // calc mean and variance
-    // TODO: fix results to two decimal places
-    val year = yearBirthsData._1
-    val mean = yearBirthsData._2._1.toDouble / yearBirthsData._2._2 // u = total/count
-    val getVariance = (x: Double) => Math.pow(x - mean, 2) / yearBirthsData._2._2 // var(x) = E[(x-u)^2]
-    val pointsToTry = rawDataPoints
-    val variance = pointsToTry.map(_._2.toDouble).map(getVariance).reduce(_+_)
-
-    (year, mean, variance)
+    def getVariance(mean: Double) = (x: Double) => Math.pow(x - mean, 2).toDouble // var(x) = E[(x-u)^2]
+    (year, mean, dailyDataPoints.map(x => getVariance(mean)(x)).reduce(_ + _).toDouble / (count - 1));
   }
 
   def printSummaryWindow(result: (String, Double, Double)) = {
+    // TODO: fix results to two decimal places
     val year = result._1
     val mean = result._2
     val variance = result._3
-    println(year + " | " + mean + " | " + variance)
+    println(year + " \t| " + BigDecimal(mean).setScale(2, BigDecimal.RoundingMode.HALF_UP) + " \t| " + BigDecimal(variance).setScale(2, BigDecimal.RoundingMode.HALF_UP))
   }
 }

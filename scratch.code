@@ -36,3 +36,23 @@
 
     spark.stop()
 ...
+
+...
+  def formatData(dataset: RDD[(String, Int)]): RDD[(String, (Int, Int))] = {
+    dataset.map(line => (line._1, (line._2, 1)))
+      .reduceByKey((a, b) => (a._1 + b._1, a._2 + b._2))
+  }
+
+  def summariseStatisticsV(rawDataPoints: RDD[(String, Int)])(yearBirthsData: (String, (Int, Int))) = {
+    // calc mean and variance
+    // TODO: fix results to two decimal places
+    val year = yearBirthsData._1
+    val mean = yearBirthsData._2._1.toDouble / yearBirthsData._2._2 // u = total/count
+    val getVariance = (x: Double) => Math.pow(x - mean, 2) / yearBirthsData._2._2 // var(x) = E[(x-u)^2]
+    // problem here is that each data point needs to be included in the variance equation for the sumatory.
+    // Initially I incorrectly used the single aggregated total for the calculation.
+    val variance = rawDataPoints.map(_._2.toDouble).map(getVariance).reduce(_+_)
+
+    (year, mean, variance)
+  }
+...
