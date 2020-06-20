@@ -1,0 +1,38 @@
+...
+// Compute Category, Mean, Variance by year of US Births
+    val populationStatistics = population
+        .map(line => (line._1, (line._2, 1)))
+      .reduceByKey((a, b) => (a._1+b._1, a._2+b._2))
+      //.reduce((a, b) => ("all", (a._2._1+b._2._1, a._2._2+b._2._2)))
+
+//    val totalsByYear = population
+//      .reduceByKey(_+_)
+//      .sortByKey()
+
+    populationStatistics.collect().map(line => {
+      println(line)
+      line
+    })
+    //println(populationStatistics)
+...
+
+
+...
+
+    // Create 1000 samples with replacement for bootstrapping
+    for ( n <- 0 to 1000) {
+      val resampledData = formatData(bootstrapSample.sample(true, 1))
+      resampledData.collect().map(a => {
+        bootstrapSampleAggregate = bootstrapSampleAggregate :+ a
+      })
+      //println(n)
+      //resampledData.collect()//.map(println)
+    }
+
+    bootstrapSampleAggregate.map(summariseStatistics).foreach()
+
+    // Summarize results
+    //bootstrappingSamples.collect()
+
+    spark.stop()
+...
