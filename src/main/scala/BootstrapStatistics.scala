@@ -35,16 +35,17 @@ object BootstrapStatistics {
     println("Year \t| Mean \t\t| Variance")
     prepareForSummary(population)
       .map(summarizeStatistics)
+      .sortBy(a => a._1)
       //.saveAsTextFile("output")
       .collect()
       .foreach(printSummaryWindow)
 
     // Set up bootstrapping
     val bootstrapSample = population.sample(false, 0.25)
-    var bootstrapSampleAggregate = collection.mutable.Map[String, (Double, Double)]()
+    var bootstrapSampleAggregate = collection.mutable.TreeMap[String, (Double, Double)]()
 
     for (n <- 0 to numberOfIterations) {
-      val dataResample = prepareForSummary(bootstrapSample.sample(true, 1))
+      prepareForSummary(bootstrapSample.sample(true, 1))
         .map(summarizeStatistics)
         .collect()
         .map(x => {
