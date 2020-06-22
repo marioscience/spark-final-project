@@ -85,10 +85,14 @@ object BootstrapStatistics {
   }
 
   def printSummaryWindow(result: (String, Double, Double)) = {
-    // TODO: fix results to two decimal places
     val year = result._1
-    val mean = result._2
-    val variance = result._3
-    println(year + " \t| " + BigDecimal(mean).setScale(2, BigDecimal.RoundingMode.HALF_UP) + " \t| " + BigDecimal(variance).setScale(2, BigDecimal.RoundingMode.HALF_UP))
+    val mean = BigDecimal(result._2).setScale(2, BigDecimal.RoundingMode.HALF_UP)
+    val variance = BigDecimal(result._3).setScale(2, BigDecimal.RoundingMode.HALF_UP)
+    println(year + " \t| " + mean + " \t| " + variance)
   }
 }
+
+
+
+
+
